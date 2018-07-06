@@ -201,11 +201,11 @@ int main() {
   	map_waypoints_dy.push_back(d_y);
   }
 
-  int lane = 1;
+  int ego_lane = 1;
+  double ref_velocity = 0;
 
-  double ref_velocity = 49.5;
 
-  h.onMessage([&ref_velocity,&map_waypoints_x,&map_waypoints_y,&map_waypoints_s,&map_waypoints_dx,&map_waypoints_dy, &lane](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
+  h.onMessage([&ref_velocity,&ego_lane, &map_waypoints_x,&map_waypoints_y,&map_waypoints_s,&map_waypoints_dx,&map_waypoints_dy](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
                      uWS::OpCode opCode) {
     // "42" at the start of the message means there's a websocket message event.
     // The 4 signifies a websocket message
@@ -240,17 +240,105 @@ int main() {
           	double end_path_d = j[1]["end_path_d"];
 
           	// Sensor Fusion Data, a list of all other cars on the same side of the road.
-          	auto sensor_fusion = j[1]["sensor_fusion"];
-
-          	json msgJson;
+          	vector<vector<double>> sensor_fusion = j[1]["sensor_fusion"];
 
             int prev_pathsize = previous_path_x.size();
+            const double max_accel = .224;
+
+            if(prev_pathsize>0)
+            {
+              car_s = end_path_s;
+            }
+
+            bool car_f = false;
+            bool car_l = false;
+            bool car_r = false;
+
+            for(int i=0; i<sensor_fusion.size(); i++)
+            {
+
+              float d = sensor_fusion[i][6];
+              double vx = sensor_fusion[i][3];
+              double vy = sensor_fusion[i][4];
+              double check_speed = sqrt(vx*vx+vy*vy); //magnitude --> distance value
+              double check_car_s = sensor_fusion[i][5]; //s value
+              check_car_s+= ((double)prev_pathsize*0.02*check_speed);
+
+              int target_veh_lane = -1;
+
+              if(d>0 && d<4)
+              {
+                target_veh_lane=0;
+              }
+              else if (d>4 && d<8)
+              {
+                target_veh_lane=1;
+              }
+              else if (d>8 && d<12)
+              {
+                target_veh_lane=2;
+              }
+              else
+              {
+                continue;
+              }
+
+              if(target_veh_lane == ego_lane)
+              {
+                if((check_car_s > car_s) && ((check_car_s-car_s) < 30))
+                {
+                  car_f = true;
+                }
+              }
+
+              if (target_veh_lane > ego_lane)
+              {
+                if((car_s-30)<check_car_s && ((car_s+30)>check_car_s))
+                {
+                  car_r = true;
+                }
+              }
+
+              if (target_veh_lane < ego_lane)
+              {
+                if((car_s-30)<check_car_s && ((car_s+30)>check_car_s))
+                {
+                  car_l = true;
+                }
+              }
+            }
+
+            if (car_f)
+            {
+              if(!car_l && ego_lane>0)
+              {
+                ego_lane--;
+              }
+              else if(!car_r && ego_lane != 2)
+              {
+                ego_lane++;
+              }
+              else
+              {
+                ref_velocity -= max_accel;
+              }
+            }
+            else {
+              if(ego_lane != 1){
+                if((ego_lane==0 && !car_r) || (ego_lane==2 && !car_l)){
+                  ego_lane = 1;
+                }
+              }
+
+              if (ref_velocity<49.5)
+              {
+                ref_velocity += max_accel;
+              }
+            }
+
 
             vector<double> ptsx;
             vector<double> ptsy;
-
-          	vector<double> next_x_vals;
-          	vector<double> next_y_vals;
 
           	// TODO: define a path made up of (x,y) points that the car will visit sequentially every .02 seconds
 
@@ -284,9 +372,9 @@ int main() {
               ptsy.push_back(pos_y);
             }
 
-            vector<double> next_wp0 = getXY(car_s+30, (2+4*lane), map_waypoints_s, map_waypoints_x, map_waypoints_y);
-            vector<double> next_wp1 = getXY(car_s+60, (2+4*lane), map_waypoints_s, map_waypoints_x, map_waypoints_y);
-            vector<double> next_wp2 = getXY(car_s+90, (2+4*lane), map_waypoints_s, map_waypoints_x, map_waypoints_y);
+            vector<double> next_wp0 = getXY(car_s+30, (2+4*ego_lane), map_waypoints_s, map_waypoints_x, map_waypoints_y);
+            vector<double> next_wp1 = getXY(car_s+60, (2+4*ego_lane), map_waypoints_s, map_waypoints_x, map_waypoints_y);
+            vector<double> next_wp2 = getXY(car_s+90, (2+4*ego_lane), map_waypoints_s, map_waypoints_x, map_waypoints_y);
 
             ptsx.push_back(next_wp0[0]);
             ptsx.push_back(next_wp1[0]);
@@ -296,7 +384,7 @@ int main() {
             ptsy.push_back(next_wp1[1]);
             ptsy.push_back(next_wp2[1]);
 
-            for (int i=0; i<next_x_vals.size(); i++){
+            for (int i=0; i<ptsx.size(); i++){
               double shift_x = ptsx[i] - pos_x;
               double shift_y = ptsy[i] - pos_y;
 
@@ -309,7 +397,10 @@ int main() {
 
             s.set_points(ptsx, ptsy);
 
-            for(int i = 0; i < prev_pathsize; i++){
+            vector<double> next_x_vals;
+          	vector<double> next_y_vals;
+
+            for(int i = 0; i < previous_path_x.size(); i++){
               next_x_vals.push_back(previous_path_x[i]);
               next_y_vals.push_back(previous_path_y[i]);
             }
@@ -341,6 +432,8 @@ int main() {
             }
 
             //END
+            json msgJson;
+
           	msgJson["next_x"] = next_x_vals;
           	msgJson["next_y"] = next_y_vals;
 
