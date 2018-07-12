@@ -243,17 +243,22 @@ int main() {
           	vector<vector<double>> sensor_fusion = j[1]["sensor_fusion"];
 
             int prev_pathsize = previous_path_x.size();
+
+            // defining a constant maximum acceleration value
             const double max_accel = .224;
 
+            // note the end_s
             if(prev_pathsize>0)
             {
               car_s = end_path_s;
             }
 
+            // flags to check vehicles in left right lanes and in front
             bool car_f = false;
             bool car_l = false;
             bool car_r = false;
 
+            // read the sensor_fusion data for target vehicles
             for(int i=0; i<sensor_fusion.size(); i++)
             {
 
@@ -266,6 +271,7 @@ int main() {
 
               int target_veh_lane = -1;
 
+              // determine the lane of target_vehicle
               if(d>0 && d<4)
               {
                 target_veh_lane=0;
@@ -282,7 +288,7 @@ int main() {
               {
                 continue;
               }
-
+              // check if the target vehicles is in our lane and within 30m distance
               if(target_veh_lane == ego_lane)
               {
                 if((check_car_s > car_s) && ((check_car_s-car_s) < 30))
@@ -308,6 +314,7 @@ int main() {
               }
             }
 
+            // logic to change lane and accelerate decelerate based on target vehicle location
             if (car_f)
             {
               if(!car_l && ego_lane>0)
@@ -336,11 +343,9 @@ int main() {
               }
             }
 
-
+            // define a path made up of (x,y) points that the car will visit sequentially every .02 seconds
             vector<double> ptsx;
             vector<double> ptsy;
-
-          	// TODO: define a path made up of (x,y) points that the car will visit sequentially every .02 seconds
 
             double pos_x = car_x;
             double pos_y = car_y;
